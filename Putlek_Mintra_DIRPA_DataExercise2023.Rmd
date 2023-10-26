@@ -1,0 +1,416 @@
+---
+title: "Pikes Peak Race Data Analysis"
+output: pdf_document
+date: "2023-10-09"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+This document provides an analysis of the Pikes Peak race data for both male and female participants. We'll explore the data, clean it, and then generate visualizations to answer specific questions about the race results.
+
+## Data Loading and Preprocessing
+
+```{r load-data, message=FALSE, warning=FALSE}
+#Load Libraries
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(lubridate)
+library(scales)
+
+library(gt)
+```
+
+```{r}
+#Load Data
+females_data <- read.delim("/Users/mintraputlek/Library/CloudStorage/OneDrive-UniversityofMiami/UMIAMI/Classes/2023FALL/DIRPA Data Exercise 2023/DIRPA_Exer_PikesPeak_Females.txt", header=TRUE, stringsAsFactors=FALSE) %>%
+  mutate(Gender = "Female")
+males_data <- read.delim("/Users/mintraputlek/Library/CloudStorage/OneDrive-UniversityofMiami/UMIAMI/Classes/2023FALL/DIRPA Data Exercise 2023/DIRPA_Exer_PikesPeak_Males.txt", header=TRUE, stringsAsFactors=FALSE) %>%
+  mutate(Gender = "Male")
+
+combined_data <- bind_rows(females_data, males_data)
+```
+
+
+```{r}
+#Format Time Function
+format_time <- function(time_str) {
+  parts <- unlist(strsplit(time_str, ":"))
+  
+  if (length(parts) == 1) {
+    return(sprintf("00:00:%02d", as.integer(parts[1])))
+  } else if (length(parts) == 2) {
+    return(sprintf("00:%02d:%02d", as.integer(parts[1]), as.integer(parts[2])))
+  } else if (length(parts) == 3) {
+    return(sprintf("%02d:%02d:%02d", as.integer(parts[1]), as.integer(parts[2]), as.integer(parts[3])))
+  } else {
+    return(NA)
+  }
+}
+
+format_hours_minutes_seconds <- function(x) {
+  hours <- x %/% 3600
+  x <- x %% 3600
+  minutes <- x %/% 60
+  seconds <- x %% 60
+  
+  sprintf("%02d:%02d:%02d", hours, minutes, seconds)
+}
+```
+
+```{r}
+#Data Cleaning
+combined_data2 <- combined_data %>%
+  mutate(
+      Pace = gsub("[^0-9:]", "", Pace),
+      Net.Tim = gsub("[^0-9:]", "", Net.Tim),
+      Gun.Tim = gsub("[^0-9:]", "", Gun.Tim),
+      Pace_hms = hms(sapply(Pace, format_time)),
+      Net.Tim_hms = hms(sapply(Net.Tim, format_time)),
+      Gun.Tim_hms = hms(sapply(Gun.Tim, format_time)),
+      Pace_s = as.numeric(Pace_hms, "seconds"),
+      Gun.Tim_s = as.numeric(Gun.Tim_hms, "seconds"),
+      Net.Tim_s = as.numeric(Net.Tim_hms, "seconds"),
+      AgeGroup = case_when(
+        is.na(Ag) | Ag < 1 | Ag >= 70 ~"70+",   # Moved this condition to the top
+        Ag >= 0 & Ag <= 14 ~ "0-14",
+        Ag >= 15 & Ag <= 19 ~ "15-19",
+        Ag >= 20 & Ag <= 29 ~ "20-29",
+        Ag >= 30 & Ag <= 39 ~ "30-39",
+        Ag >= 40 & Ag <= 49 ~ "40-49",
+        Ag >= 50 & Ag <= 59 ~ "50-59",
+        Ag >= 60 & Ag <= 69 ~ "60-69",
+        TRUE ~ as.character(Ag)
+    )
+    ) %>%
+  separate(Div.Tot, into = c("Division", "Total.Racers"), sep = "/") %>%
+  mutate(
+    Division = paste(Gender, AgeGroup, sep="-")
+    ) %>%
+  group_by(Division) %>%
+  mutate(
+    Division = cur_group_id()
+    ) %>%
+  ungroup()
+
+```
+
+
+
+## Question 1
+
+What are the mean, median, mode, and range of the race results for all racers by gender?
+
+```{r pressure, echo=FALSE}
+#Q1 Boxplot
+combined_data2 %>%
+  ggplot(aes(x = Gender, y = Net.Tim_s)) +
+  geom_boxplot(
+            # custom boxes
+        color="darkgreen",
+        fill="darkgreen",
+        alpha=0.2,
+        
+        # custom outliers
+        outlier.colour="grey",
+        outlier.fill="grey",
+        outlier.size=3
+  ) +
+  stat_summary(fun=mean, geom="point", shape=4, color="black", size=3) +
+  labs(title = "Distribution of Race Results by Gender",
+       x = "Gender",
+       y = "Race Result (in minutes)") +
+ scale_y_continuous(labels = format_hours_minutes_seconds, breaks = seq(0, 14400, by=600)) +
+  theme_minimal()
+
+
+```
+
+```{r}
+# Table
+combined_data2 %>%
+  group_by(Gender) %>%
+  summarise(
+    Min_Time = min(Net.Tim_s, na.rm = TRUE),
+    Max_Time = max(Net.Tim_s, na.rm = TRUE),
+    Mean_Time = mean(Net.Tim_s, na.rm = TRUE),
+    Median_Time = median(Net.Tim_s, na.rm = TRUE),
+    Range_Time = Max_Time - Min_Time
+  ) %>%
+  mutate(
+    Min_Time = seconds_to_period(Min_Time),
+    Max_Time = seconds_to_period(Max_Time),
+    Mean_Time = seconds_to_period(Mean_Time),
+    Median_Time = seconds_to_period(Median_Time),
+    Range_Time = seconds_to_period(Range_Time)
+  )
+```
+
+```{r}
+# First, generate the summarized data
+summarized_data <- combined_data2 %>%
+  group_by(Gender) %>%
+  summarise(
+    Min_Time = min(Net.Tim_s, na.rm = TRUE),
+    Max_Time = max(Net.Tim_s, na.rm = TRUE),
+    Mean_Time = mean(Net.Tim_s, na.rm = TRUE),
+    Median_Time = median(Net.Tim_s, na.rm = TRUE),
+    Range_Time = Max_Time - Min_Time
+  )
+
+```
+
+```{r}
+library(dplyr)
+
+mode_by_gender <- combined_data2 %>%
+  group_by(Gender) %>%
+  count(Net.Tim_s) %>%
+  arrange(Gender, desc(n)) %>%
+  slice(1) %>%
+  select(Gender, Net.Tim_s)
+
+format_hours_minutes_seconds(2886)
+
+format_hours_minutes_seconds(2128)
+
+
+
+```
+
+```{r}
+#Histogram for Mode and Range
+combined_data2 %>%
+    ggplot(
+           aes(x=Net.Tim_s, fill=Gender,text = Gender))+
+      geom_histogram(
+        alpha=0.7, color="black",  bins=33)+
+      labs(x="Net Time (hh:mm:ss)", y="Number of Runners") +
+      guides(fill=guide_legend(title="Gender"))+
+      theme_minimal()+
+      theme(
+        axis.text.x = element_text(angle = 45,hjust = 1, size = 10),
+        axis.text.y = element_text(size = 10),
+        axis.title.x = element_text(size = 10),
+        axis.title.y = element_text(size = 10),
+        plot.title = element_text(size = 20),
+        legend.text = element_text(size = 12)
+      ) +
+      scale_fill_manual(values=c("Male"="#DFE0E0", "Female"="#A7EE8A")) +  # Change colors here
+      scale_x_continuous(labels = format_hours_minutes_seconds, breaks = seq(0, 14400, by=600)) +
+      scale_y_continuous() 
+        #ggtitle("Racer Time Distribution")
+```
+## Question 2
+
+Analyze the difference between gun and net time race results.
+```{r}
+# Calculate the difference
+combined_data2 <- combined_data2 %>%
+  mutate(Difference = Gun.Tim_s - Net.Tim_s)
+
+# Generate and print summary statistics
+summary_stats <- combined_data2 %>%
+  summarise(
+    Mean_Difference = mean(Difference, na.rm = TRUE),
+    Median_Difference = median(Difference, na.rm = TRUE),
+    Std_Dev_Difference = sd(Difference, na.rm = TRUE)
+  ) %>%   
+  mutate(
+    Mean_dif = seconds_to_period(Mean_Difference),
+    Max_dif = seconds_to_period(Median_Difference),
+    Std_Dev_dif = seconds_to_period(Std_Dev_Difference)
+  )
+
+print(summary_stats)
+
+# Visualize the distribution
+combined_data2 %>%
+  group_by(
+    Gender
+  )%>%
+  ggplot(aes(x = Difference)) +
+  geom_histogram(fill = "#A7EE8A", color = "darkgreen", bins = 8) +
+  labs(#title = "Distribution of Difference between Gun Time and Net Time",
+       x = "Difference between Net and Gun Times (hh:mm:ss)",
+       y = "Number of Racers") +
+  scale_x_continuous(labels = format_hours_minutes_seconds, breaks = seq(0, 600, by=120)) +
+  theme_minimal()
+
+```
+
+
+## Question 3
+
+How much time separates Chris Doe from the top 10 percentile of racers of the same division?
+
+```{r}
+
+# Identify Chris Doe's division
+chris_division <- combined_data2 %>%
+  filter(Name == "Chris Doe") %>%
+  pull(Division)
+
+#Find Chris's Time 
+chris_time <- combined_data2 %>%
+  filter(Name == "Chris Doe") %>%
+  pull(Net.Tim_s)
+
+# Calculate the top 10 percentile time for that division
+top_10_percentile_time <- combined_data2 %>%
+  filter(Division == chris_division) %>%
+  summarise(tenth_percentile = quantile(Net.Tim_s, 0.1)) %>%
+  pull(tenth_percentile)
+
+# Calculate Chris's result
+chris_result <- round(chris_time - top_10_percentile_time)
+chris_result_hms <- format_hours_minutes_seconds(chris_result)
+chris_time_hms <- format_hours_minutes_seconds(chris_time)
+
+
+
+
+# Filter the data for the division of interest
+division_data <- combined_data2 %>%
+  filter(Division == chris_division)
+```
+
+
+```{r}
+division_data %>%
+  ggplot(aes(x = "", y = Net.Tim_s)) + 
+  geom_boxplot(fill = "gray", alpha = 0.5) +
+  geom_jitter(data = subset(division_data, Name == "Chris Doe"), 
+              aes(y = Net.Tim_s, color = "Chris Doe's Time"), 
+              width = 0.2) + 
+  geom_hline(aes(yintercept = top_10_percentile_time, color = "Top 10 Percentile"), 
+             linetype = "dashed") +
+  labs(#title = "Box Plot of Race Times",
+       x = "",
+       y = "Net Time (hh:mm:ss)") +
+  scale_color_manual(name = "", 
+                     values = c("Chris Doe's Time" = "lightgreen", 
+                                "Top 10 Percentile" = "darkgreen")) +
+  scale_y_continuous(labels = format_hours_minutes_seconds) +
+  theme_minimal()
+
+```
+
+## Question 4
+
+
+Compare the race results of each division.
+```{r}
+# Summarize the average race results for each division
+division_summary <- combined_data2 %>%
+  group_by(Division) %>%
+  summarise(
+    mean_time = mean(Net.Tim_s, na.rm = TRUE)
+  )
+
+# Create a column chart to compare average race results by division
+race_results_plot <- ggplot(division_summary, aes(x = Division, y = mean_time)) +
+  geom_col(aes(fill = Division)) +  # This creates the columns
+  labs(
+    title = "Comparison of Average Race Results by Division",
+    x = "Division",
+    y = "Average Time (seconds)"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels for better readability
+        legend.position = "none")  # Hide legend as the fill colors correspond to the x-axis labels
+
+
+  
+
+
+```
+
+
+
+```{r}
+# Prepare data: Order data by Division and Net.Tim_s
+combined_data2$Division <- factor(combined_data2$Division, levels = 1:16)
+
+combined_data2 %>%
+    ggplot(aes(x = Division, y = Net.Tim_s, fill = Gender)) +  # Add fill aesthetic here
+    geom_boxplot(color = "darkgreen", alpha = 0.7) +
+    labs(#title = "Box Plots of Race Times by Division", 
+         y = "Time (seconds)", 
+         x = "Division") +
+    scale_fill_manual(values = c("grey", "lightgreen"), 
+                      name = "Gender", 
+                      breaks = c("Male", "Female")) +  # Set colors for male and female
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+      scale_y_continuous(labels = format_hours_minutes_seconds, breaks = seq(0, 14400, by=600)) 
+
+
+
+```
+
+
+
+
+
+```{r}
+
+gt_theme_espn <- function(data, ...){
+  data %>% 
+    opt_all_caps()  %>%
+    opt_table_font(
+      font = list(
+        google_font("Lato"),
+        default_fonts()
+      )
+    )  %>% 
+    opt_row_striping() %>% 
+    tab_options(
+      row.striping.background_color = "#fafafa",
+      table_body.hlines.color = "#f6f7f7",
+      source_notes.font.size = 12,
+      table.font.size = 16,
+      table.width = px(700),
+      heading.align = "left",
+      heading.title.font.size = 24,
+      table.border.top.color = "transparent",
+      table.border.top.width = px(3),
+      data_row.padding = px(7),
+      ...
+    ) 
+}
+
+winners_data <- combined_data2 %>%
+  select(
+    Division,
+    Name,
+    Hometown,
+    Net.Tim_s
+  ) %>%
+  group_by(Division) %>%
+  slice_min(Net.Tim_s, n = 1) %>%
+  ungroup()
+
+winners_data$FormattedTime <- seconds_to_period(winners_data$Net.Tim_s)
+
+winners_data %>%
+  gt() %>%
+  tab_header(
+    title = "Winners by Division"
+  ) %>%
+  fmt_number(columns = c("Net.Tim_s"), decimals = 2) %>%
+  cols_hide(columns = "Net.Tim_s") %>%
+  gt_theme_espn()
+
+
+
+```
+
+
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
